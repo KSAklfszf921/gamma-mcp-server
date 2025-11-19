@@ -1,18 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * Gamma MCP Server (HTTP mode with Streamable HTTP transport)
+ * Gamma MCP Server (HTTP mode with JSON-RPC)
  * For use with AI Engine and other HTTP-based MCP clients
  */
 
 import express, { Request, Response } from 'express';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  Tool,
-} from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
 import { GammaClient } from './gamma-client.js';
 
@@ -32,8 +25,8 @@ if (!GAMMA_API_KEY) {
 // Initialize Gamma client
 const gammaClient = new GammaClient(GAMMA_API_KEY, GAMMA_API_BASE_URL);
 
-// Define MCP tools (same as stdio version)
-const TOOLS: Tool[] = [
+// Define MCP tools
+const TOOLS = [
   {
     name: 'gamma_generate',
     description: 'Generate a new Gamma presentation, document, or webpage. Returns a generation ID that can be used to check status.',
@@ -129,112 +122,125 @@ app.get('/health', (req: Request, res: Response) => {
   });
 });
 
-// MCP endpoint handler
+// MCP endpoint - handles JSON-RPC 2.0
 app.post('/mcp', async (req: Request, res: Response) => {
-  console.log('[MCP] Incoming request:', req.body);
+  console.log('[MCP] Incoming request:', JSON.stringify(req.body, null, 2));
 
-  // Create a new MCP server instance for this request
-  const server = new Server(
-    {
-      name: 'gamma-mcp-server',
-      version: '1.0.0',
-    },
-    {
-      capabilities: {
-        tools: {},
+  const { jsonrpc, id, method, params } = req.body;
+
+  // Validate JSON-RPC request
+  if (jsonrpc !== '2.0' || !method) {
+    return res.status(400).json({
+      jsonrpc: '2.0',
+      id: id || null,
+      error: {
+        code: -32600,
+        message: 'Invalid Request',
       },
+    });
+  }
+
+  try {
+    let result: any;
+
+    // Handle different MCP methods
+    switch (method) {
+      case 'tools/list':
+        result = {
+          tools: TOOLS,
+        };
+        break;
+
+      case 'tools/call':
+        const { name, arguments: args } = params;
+
+        switch (name) {
+          case 'gamma_generate': {
+            const gammaResult = await gammaClient.generate({
+              inputText: (args?.inputText || '') as string,
+              format: args?.format as any,
+              numCards: args?.numCards as number,
+              textTone: args?.textTone as string,
+              textAudience: args?.textAudience as string,
+              textAmount: args?.textAmount as any,
+              textLanguage: args?.textLanguage as string,
+              themeName: args?.themeName as string,
+              additionalInstructions: args?.additionalInstructions as string,
+            });
+
+            result = {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(gammaResult, null, 2),
+                },
+              ],
+            };
+            break;
+          }
+
+          case 'gamma_get_generation': {
+            const gammaResult = await gammaClient.getGeneration((args?.generationId || '') as string);
+
+            result = {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(gammaResult, null, 2),
+                },
+              ],
+            };
+            break;
+          }
+
+          case 'gamma_list_generations': {
+            const gammaResult = await gammaClient.listGenerations(
+              args?.limit ? Number(args.limit) : 10
+            );
+
+            result = {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(gammaResult, null, 2),
+                },
+              ],
+            };
+            break;
+          }
+
+          default:
+            throw new Error(`Unknown tool: ${name}`);
+        }
+        break;
+
+      default:
+        throw new Error(`Unknown method: ${method}`);
     }
-  );
 
-  // Handle list_tools
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: TOOLS,
-    };
-  });
+    // Send JSON-RPC success response
+    res.json({
+      jsonrpc: '2.0',
+      id,
+      result,
+    });
 
-  // Handle tool calls
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
+    console.log('[MCP] Response sent successfully');
 
-    try {
-      switch (name) {
-        case 'gamma_generate': {
-          const result = await gammaClient.generate({
-            inputText: (args?.inputText || '') as string,
-            format: args?.format as any,
-            numCards: args?.numCards as number,
-            textTone: args?.textTone as string,
-            textAudience: args?.textAudience as string,
-            textAmount: args?.textAmount as any,
-            textLanguage: args?.textLanguage as string,
-            themeName: args?.themeName as string,
-            additionalInstructions: args?.additionalInstructions as string,
-          });
+  } catch (error) {
+    console.error('[MCP] Error:', error);
 
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2),
-              },
-            ],
-          };
-        }
-
-        case 'gamma_get_generation': {
-          const result = await gammaClient.getGeneration((args?.generationId || '') as string);
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2),
-              },
-            ],
-          };
-        }
-
-        case 'gamma_list_generations': {
-          const result = await gammaClient.listGenerations(
-            args?.limit ? Number(args.limit) : 10
-          );
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2),
-              },
-            ],
-          };
-        }
-
-        default:
-          throw new Error(`Unknown tool: ${name}`);
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({ error: errorMessage }, null, 2),
-          },
-        ],
-        isError: true,
-      };
-    }
-  });
-
-  // Use SSE transport for streaming
-  const transport = new SSEServerTransport('/mcp', res);
-  await server.connect(transport);
-
-  // Handle request through transport
-  req.on('close', () => {
-    console.log('[MCP] Client disconnected');
-  });
+    // Send JSON-RPC error response
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    res.json({
+      jsonrpc: '2.0',
+      id,
+      error: {
+        code: -32603,
+        message: errorMessage,
+      },
+    });
+  }
 });
 
 // Start HTTP server
