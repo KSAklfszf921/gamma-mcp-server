@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: gamma-mcp-server
+    runtime: node
+    plan: free
+    repo: https://github.com/KSAklfszf921/gamma-mcp-server
+    branch: master
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:streamable
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: HOST
+        value: 0.0.0.0
+      - key: GAMMA_API_BASE_URL
+        value: https://public-api.gamma.app/v1.0
+      - key: GAMMA_API_KEY
+        sync: false  # Set manually in Render dashboard for security
+    healthCheckPath: /health
+    autoDeploy: true
