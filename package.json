@@ -1,6 +1,6 @@
 {
   "name": "gamma-mcp-server",
-  "version": "1.0.0",
+  "version": "2.1.0",
   "description": "MCP Server for Gamma.app presentation generation",
   "main": "dist/index.js",
   "type": "module",

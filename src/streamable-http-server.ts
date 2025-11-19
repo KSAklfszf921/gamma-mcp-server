@@ -232,7 +232,7 @@ app.get('/health', (req: Request, res: Response) => {
   res.json({
     status: 'healthy',
     server: 'gamma-mcp-server',
-    version: '2.0.0',
+    version: '2.1.0',
     tools: TOOLS.length,
     timestamp: new Date().toISOString()
   });
@@ -261,6 +261,25 @@ app.post('/mcp', async (req: Request, res: Response) => {
 
     // Handle different MCP methods
     switch (method) {
+      case 'initialize':
+        // MCP handshake - required for standard MCP clients
+        result = {
+          protocolVersion: '2024-11-05',
+          capabilities: {
+            tools: {},
+          },
+          serverInfo: {
+            name: 'gamma-mcp-server',
+            version: '2.1.0',
+          },
+        };
+        break;
+
+      case 'notifications/initialized':
+        // Client confirms initialization complete
+        // No response needed for notifications
+        return res.status(204).send();
+
       case 'tools/list':
         result = {
           tools: TOOLS,
@@ -407,8 +426,9 @@ app.post('/mcp', async (req: Request, res: Response) => {
 
 // Start HTTP server
 app.listen(PORT, HOST, () => {
-  console.log(`✅ Gamma MCP Server v2.0.0 running on http://${HOST}:${PORT}`);
+  console.log(`✅ Gamma MCP Server v2.1.0 running on http://${HOST}:${PORT}`);
   console.log(`📡 MCP endpoint: http://${HOST}:${PORT}/mcp`);
   console.log(`💚 Health check: http://${HOST}:${PORT}/health`);
   console.log(`🔧 Tools: ${TOOLS.length} (generate, from-template, get, list-themes, list-folders)`);
+  console.log(`🤝 MCP Protocol: Full support (initialize + tools)`);
 });
